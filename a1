@@ -1,87 +1,106 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Responsive Image Gallery</title>
+  <title>Personal Data Form</title>
   <style>
     body {
       font-family: Arial, sans-serif;
-      margin: 0;
+      margin: 20px;
+    }
+    form {
+      max-width: 400px;
+      margin: auto;
       padding: 20px;
-    }
-
-    .gallery {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 15px;
-      justify-content: center;
-    }
-
-    .gallery-item {
-      flex: 1 1 calc(33.333% - 30px);
-      box-sizing: border-box;
-      text-align: center;
-    }
-
-    .gallery-item a {
-      text-decoration: none;
-      color: inherit;
-    }
-
-    .gallery-item img {
-      width: 100%;
-      height: auto;
+      border: 1px solid #ccc;
       border-radius: 8px;
-      transition: transform 0.3s ease;
     }
-
-    .gallery-item img:hover {
-      transform: scale(1.05);
-    }
-
-    .caption {
-      margin-top: 8px;
-      font-size: 14px;
+    label {
+      display: block;
+      margin-top: 10px;
       font-weight: bold;
     }
-
-    /* Responsive adjustments */
-    @media (max-width: 768px) {
-      .gallery-item {
-        flex: 1 1 calc(50% - 30px);
-      }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      box-sizing: border-box;
     }
-
-    @media (max-width: 480px) {
-      .gallery-item {
-        flex: 1 1 100%;
-      }
+    .inline {
+      display: inline-block;
+      margin-right: 10px;
+    }
+    button {
+      margin-top: 15px;
+      padding: 10px 15px;
+      background-color: #007BFF;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:hover {
+      background-color: #0056b3;
     }
   </style>
 </head>
 <body>
-  <h1>Responsive Image Gallery</h1>
-  <div class="gallery">
-    <div class="gallery-item">
-      <a href="https://example.com/link1" target="_blank">
-        <img src="https://via.placeholder.com/400x250" alt="Image 1">
-        <div class="caption">Caption One</div>
-      </a>
+  <h2>Personal Data Form</h2>
+  <form action="#" method="post">
+    <!-- Text field for name -->
+    <label for="name">Name:</label>
+    <input type="text" id="name" name="name" required>
+
+    <!-- Password field -->
+    <label for="password">Password:</label>
+    <input type="password" id="password" name="password" required>
+
+    <!-- Email field -->
+    <label for="email">Email:</label>
+    <input type="email" id="email" name="email" required>
+
+    <!-- List of hobbies -->
+    <label for="hobbies">Hobbies:</label>
+    <select id="hobbies" name="hobbies">
+      <option value="reading">Reading</option>
+      <option value="sports">Sports</option>
+      <option value="music">Music</option>
+      <option value="travel">Travel</option>
+    </select>
+
+    <!-- Radio buttons for gender -->
+    <label>Gender:</label>
+    <div class="inline">
+      <input type="radio" id="male" name="gender" value="male">
+      <label for="male">Male</label>
     </div>
-    <div class="gallery-item">
-      <a href="https://example.com/link2" target="_blank">
-        <img src="https://via.placeholder.com/400x250" alt="Image 2">
-        <div class="caption">Caption Two</div>
-      </a>
+    <div class="inline">
+      <input type="radio" id="female" name="gender" value="female">
+      <label for="female">Female</label>
     </div>
-    <div class="gallery-item">
-      <a href="https://example.com/link3" target="_blank">
-        <img src="https://via.placeholder.com/400x250" alt="Image 3">
-        <div class="caption">Caption Three</div>
-      </a>
+    <div class="inline">
+      <input type="radio" id="other" name="gender" value="other">
+      <label for="other">Other</label>
     </div>
-  </div>
+
+    <!-- Checkboxes for interests -->
+    <label>Interests:</label>
+    <div>
+      <input type="checkbox" id="tech" name="interests" value="technology">
+      <label for="tech">Technology</label>
+    </div>
+    <div>
+      <input type="checkbox" id="art" name="interests" value="art">
+      <label for="art">Art</label>
+    </div>
+    <div>
+      <input type="checkbox" id="science" name="interests" value="science">
+      <label for="science">Science</label>
+    </div>
+
+    <!-- Submit button -->
+    <button type="submit">Submit</button>
+  </form>
 </body>
 </html>
