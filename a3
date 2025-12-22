@@ -1,0 +1,428 @@
+Full-stack student feedback web application
+
+You’re building a space where students can be honest, and instructors can see what’s working without the noise. Here’s a crisp, end-to-end blueprint with ready-to-run pieces for HTML/CSS frontend, PHP or Node.js backend, and MySQL.
+
+---
+
+Core features and roles
+
+- Student: Submit feedback (course, rating, comment), optionally anonymous; view own submissions.
+- Instructor: See feedback for their courses, filter by date/rating, view summaries.
+- Admin: Manage users/courses, moderate feedback, export data.
+
+---
+
+Architecture overview
+
+- Frontend: HTML/CSS (responsive, accessible), minimal vanilla JS for API calls.
+- Backend (choose one or offer both):
+  - Node.js + Express: RESTful APIs, JWT auth, modern tooling.
+  - PHP + PDO: Sessions + CSRF, classic LAMP deployment simplicity.
+- Database: MySQL with normalized schema and indexes.
+
+---
+
+Database schema
+
+`sql
+CREATE DATABASE IF NOT EXISTS feedbackdb CHARACTER SET utf8mb4 COLLATE utf8mb4unicode_ci;
+USE feedback_db;
+
+CREATE TABLE users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  email VARCHAR(150) NOT NULL UNIQUE,
+  role ENUM('student','instructor','admin') NOT NULL DEFAULT 'student',
+  password_hash VARCHAR(255) NOT NULL,
+  createdat TIMESTAMP DEFAULT CURRENTTIMESTAMP
+);
+
+CREATE TABLE courses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(20) NOT NULL UNIQUE,
+  title VARCHAR(200) NOT NULL,
+  instructor_id INT NOT NULL,
+  FOREIGN KEY (instructor_id) REFERENCES users(id)
+);
+
+CREATE TABLE feedback (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT NOT NULL,
+  course_id INT NOT NULL,
+  rating TINYINT NOT NULL CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  is_anonymous BOOLEAN DEFAULT FALSE,
+  createdat TIMESTAMP DEFAULT CURRENTTIMESTAMP,
+  FOREIGN KEY (student_id) REFERENCES users(id),
+  FOREIGN KEY (course_id) REFERENCES courses(id),
+  INDEX(courseid, createdat),
+  INDEX(student_id)
+);
+`
+
+---
+
+API design
+
+- Auth
+  - POST: /api/auth/register — create account
+  - POST: /api/auth/login — session/JWT
+  - POST: /api/auth/logout — end session
+
+- Users/Courses
+  - GET: /api/courses — list all
+  - POST: /api/courses — admin create
+  - GET: /api/instructors/:id/courses — instructor’s courses
+
+- Feedback
+  - POST: /api/feedback — submit feedback
+  - GET: /api/courses/:id/feedback?rating=&from=&to= — list/filter
+  - GET: /api/courses/:id/summary — counts and average
+
+---
+
+Backend implementation options
+
+Node.js (Express + MySQL)
+
+`js
+// server.js
+import express from 'express';
+import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import mysql from 'mysql2/promise';
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const pool = mysql.createPool({
+  host: process.env.DB_HOST || 'localhost',
+  user: process.env.DB_USER || 'root',
+  password: process.env.DB_PASS || 'yourpassword',
+  database: process.env.DBNAME || 'feedbackdb',
+  connectionLimit: 10
+});
+
+const JWTSECRET = process.env.JWTSECRET || 'changemein_env';
+
+function auth(roles = []) {
+  return (req, res, next) => {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      if (roles.length && !roles.includes(payload.role)) return res.status(403).json({ error: 'Forbidden' });
+      req.user = payload;
+      next();
+    } catch {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+  };
+}
+
+// Auth
+app.post('/api/auth/register', async (req, res) => {
+  const { name, email, password, role = 'student' } = req.body;
+  if (!name || !email || !password || password.length < 8) return res.status(400).json({ error: 'Invalid input' });
+  const hash = await bcrypt.hash(password, 10);
+  try {
+    await pool.execute('INSERT INTO users (name,email,role,password_hash) VALUES (?,?,?,?)', [name, email.toLowerCase(), role, hash]);
+    res.json({ ok: true });
+  } catch {
+    res.status(409).json({ error: 'Email already exists' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  const [rows] = await pool.execute('SELECT * FROM users WHERE email=?', [email.toLowerCase()]);
+  const user = rows[0];
+  if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ error: 'Invalid credentials' });
+  const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ token, user: { id: user.id, name: user.name, email: user.email, role: user.role } });
+});
+
+// Courses
+app.get('/api/courses', auth(['student','instructor','admin']), async (req, res) => {
+  const [rows] = await pool.execute('SELECT id, code, title FROM courses ORDER BY code');
+  res.json(rows);
+});
+app.post('/api/courses', auth(['admin']), async (req, res) => {
+  const { code, title, instructor_id } = req.body;
+  if (!code || !title || !instructor_id) return res.status(400).json({ error: 'Invalid input' });
+  await pool.execute('INSERT INTO courses (code, title, instructorid) VALUES (?,?,?)', [code.toUpperCase(), title, instructorid]);
+  res.json({ ok: true });
+});
+app.get('/api/instructors/:id/courses', auth(['instructor','admin']), async (req, res) => {
+  const instructor_id = Number(req.params.id);
+  const [rows] = await pool.execute('SELECT id, code, title FROM courses WHERE instructorid=? ORDER BY code', [instructorid]);
+  res.json(rows);
+});
+
+// Feedback
+app.post('/api/feedback', auth(['student','admin']), async (req, res) => {
+  const { courseid, rating, comment = '', isanonymous = false } = req.body;
+  if (!course_id || !rating || rating < 1 || rating > 5) return res.status(400).json({ error: 'Invalid input' });
+  await pool.execute(
+    'INSERT INTO feedback (studentid, courseid, rating, comment, is_anonymous) VALUES (?,?,?,?,?)',
+    [req.user.id, courseid, rating, comment, isanonymous]
+  );
+  res.json({ ok: true });
+});
+app.get('/api/courses/:id/feedback', auth(['student','instructor','admin']), async (req, res) => {
+  const id = Number(req.params.id);
+  const { rating, from, to } = req.query;
+  let sql = 'SELECT id, rating, comment, createdat FROM feedback WHERE courseid=?';
+  const params = [id];
+  if (rating) { sql += ' AND rating=?'; params.push(Number(rating)); }
+  if (from) { sql += ' AND created_at >= ?'; params.push(String(from)); }
+  if (to) { sql += ' AND created_at <= ?'; params.push(String(to)); }
+  sql += ' ORDER BY created_at DESC LIMIT 200';
+  const [rows] = await pool.execute(sql, params);
+  res.json(rows);
+});
+app.get('/api/courses/:id/summary', auth(['instructor','admin']), async (req, res) => {
+  const id = Number(req.params.id);
+  const [rows] = await pool.execute('SELECT COUNT(*) AS count, ROUND(AVG(rating),2) AS avgrating FROM feedback WHERE courseid=?', [id]);
+  res.json(rows[0] || { count: 0, avg_rating: null });
+});
+
+const port = process.env.PORT || 3000;
+app.listen(port, () => console.log(Server running on http://localhost:${port}));
+`
+
+PHP (PDO + Sessions + CSRF)
+
+`php
+<?php
+// api/config.php
+declare(strict_types=1);
+session_start([
+  'cookie_secure' => true,
+  'cookie_httponly' => true,
+  'cookie_samesite' => 'Lax'
+]);
+
+$pdo = new PDO('mysql:host=localhost;dbname=feedback_db;charset=utf8mb4', 'root', 'yourpassword', [
+  PDO::ATTRERRMODE => PDO::ERRMODEEXCEPTION,
+  PDO::ATTRDEFAULTFETCHMODE => PDO::FETCHASSOC,
+]);
+
+function json($data, int $code = 200) { httpresponsecode($code); header('Content-Type: application/json'); echo json_encode($data); exit; }
+function require_auth(array $roles = []) {
+  if (!isset($_SESSION['user'])) json(['error' => 'Unauthorized'], 401);
+  if ($roles && !inarray($SESSION['user']['role'], $roles, true)) json(['error' => 'Forbidden'], 403);
+}
+function require_csrf() {
+  if ($SERVER['REQUESTMETHOD'] === 'POST') {
+    $t = $POST['csrf'] ?? ($SERVER['HTTPXCSRF_TOKEN'] ?? '');
+    if (!isset($SESSION['csrf']) || !hashequals($_SESSION['csrf'], $t)) json(['error' => 'Invalid CSRF token'], 403);
+  }
+}
+if (!isset($SESSION['csrf'])) $SESSION['csrf'] = bin2hex(random_bytes(16));
+`
+
+`php
+<?php
+// api/index.php
+require DIR.'/config.php';
+$path = parseurl($SERVER['REQUESTURI'], PHPURL_PATH);
+$method = $SERVER['REQUESTMETHOD'];
+
+if ($path === '/api/auth/register' && $method === 'POST') {
+  require_csrf();
+  $name = trim($_POST['name'] ?? '');
+  $email = strtolower(trim($_POST['email'] ?? ''));
+  $password = $_POST['password'] ?? '';
+  $role = $_POST['role'] ?? 'student';
+  if (!$name || !filtervar($email, FILTERVALIDATE_EMAIL) || strlen($password) < 8) json(['error' => 'Invalid input'], 400);
+  $hash = passwordhash($password, PASSWORDDEFAULT);
+  try {
+    $stmt = $pdo->prepare('INSERT INTO users (name,email,role,password_hash) VALUES (?,?,?,?)');
+    $stmt->execute([$name, $email, $role, $hash]);
+    json(['ok' => true]);
+  } catch (PDOException $e) { json(['error' => 'Email already exists'], 409); }
+}
+
+if ($path === '/api/auth/login' && $method === 'POST') {
+  require_csrf();
+  $email = strtolower(trim($_POST['email'] ?? ''));
+  $password = $_POST['password'] ?? '';
+  $stmt = $pdo->prepare('SELECT id,name,email,role,password_hash FROM users WHERE email=?');
+  $stmt->execute([$email]);
+  $user = $stmt->fetch();
+  if (!$user || !passwordverify($password, $user['passwordhash'])) json(['error' => 'Invalid credentials'], 401);
+  unset($user['password_hash']);
+  $_SESSION['user'] = $user;
+  json(['ok' => true, 'user' => $user, 'csrf' => $_SESSION['csrf']]);
+}
+
+if ($path === '/api/courses' && $method === 'GET') {
+  require_auth();
+  $stmt = $pdo->query('SELECT id, code, title FROM courses ORDER BY code');
+  json($stmt->fetchAll());
+}
+
+if ($path === '/api/courses' && $method === 'POST') {
+  requireauth(['admin']); requirecsrf();
+  $code = strtoupper(trim($POST['code'] ?? '')); $title = trim($POST['title'] ?? ''); $instructorid = (int)($POST['instructor_id'] ?? 0);
+  if (!$code || !$title || !$instructor_id) json(['error' => 'Invalid input'], 400);
+  $stmt = $pdo->prepare('INSERT INTO courses (code,title,instructorid) VALUES (?,?,?)'); $stmt->execute([$code, $title, $instructorid]);
+  json(['ok' => true]);
+}
+
+if ($path === '/api/feedback' && $method === 'POST') {
+  requireauth(['student','admin']); requirecsrf();
+  $courseid = (int)($POST['courseid'] ?? 0); $rating = (int)($POST['rating'] ?? 0);
+  $comment = trim($POST['comment'] ?? ''); $isanonymous = isset($POST['isanonymous']) ? (bool)$POST['isanonymous'] : false;
+  if ($course_id <= 0 || $rating < 1 || $rating > 5) json(['error' => 'Invalid input'], 400);
+  $stmt = $pdo->prepare('INSERT INTO feedback (studentid, courseid, rating, comment, is_anonymous) VALUES (?,?,?,?,?)');
+  $stmt->execute([$SESSION['user']['id'], $courseid, $rating, $comment, $is_anonymous]);
+  json(['ok' => true]);
+}
+
+if (preg_match('#^/api/courses/(\d+)/feedback$#', $path) && $method === 'GET') {
+  require_auth(['student','instructor','admin']);
+  $course_id = (int)basename($path);
+  $rating = isset($GET['rating']) ? (int)$GET['rating'] : null; $from = $GET['from'] ?? null; $to = $GET['to'] ?? null;
+  $sql = 'SELECT id, rating, comment, createdat FROM feedback WHERE courseid=?'; $params = [$course_id];
+  if ($rating) { $sql .= ' AND rating=?'; $params[] = $rating; }
+  if ($from) { $sql .= ' AND created_at >= ?'; $params[] = $from; }
+  if ($to) { $sql .= ' AND created_at <= ?'; $params[] = $to; }
+  $sql .= ' ORDER BY created_at DESC LIMIT 200';
+  $stmt = $pdo->prepare($sql); $stmt->execute($params);
+  json($stmt->fetchAll());
+}
+
+if (preg_match('#^/api/courses/(\d+)/summary$#', $path) && $method === 'GET') {
+  require_auth(['instructor','admin']);
+  $course_id = (int)basename($path);
+  $stmt = $pdo->prepare('SELECT COUNT(*) AS count, ROUND(AVG(rating),2) AS avgrating FROM feedback WHERE courseid=?'); $stmt->execute([$course_id]);
+  json($stmt->fetch() ?: ['count' => 0, 'avg_rating' => null]);
+}
+
+json(['error' => 'Not found'], 404);
+`
+
+---
+
+Frontend (HTML/CSS + minimal JS)
+
+`html
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Student Feedback</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <style>
+    :root { --primary:#2f6ef1; --bg:#f7f9fc; --card:#fff; --text:#222; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, sans-serif; background: var(--bg); margin:0; color:var(--text); }
+    header { background: var(--primary); color:#fff; padding:1rem; }
+    .container { max-width: 960px; margin: 1rem auto; padding: 0 1rem; }
+    .card { background: var(--card); border-radius: 8px; padding: 1rem; box-shadow: 0 4px 12px rgba(0,0,0,0.06); margin-bottom:1rem; }
+    button { background: var(--primary); color:#fff; border:none; padding:.6rem 1rem; border-radius:6px; cursor:pointer; }
+    input, select, textarea { width:100%; padding:.6rem; margin:.4rem 0; border:1px solid #ddd; border-radius:6px; }
+    label { font-weight:600; }
+    .help { color:#555; font-size:.9rem; }
+  </style>
+</head>
+<body>
+<header><div class="container"><h1>Student Feedback</h1></div></header>
+<main class="container">
+  <section class="card">
+    <h2>Submit feedback</h2>
+    <form id="feedbackForm">
+      <label>Course</label>
+      <select name="course_id" id="courseSelect" required></select>
+      <label>Rating (1–5)</label>
+      <input type="number" name="rating" min="1" max="5" required>
+      <label>Comment</label>
+      <textarea name="comment" rows="4" placeholder="Be specific and constructive"></textarea>
+      <label><input type="checkbox" name="is_anonymous"> Submit anonymously</label>
+      <button type="submit">Send</button>
+    </form>
+    <p id="status" class="help"></p>
+  </section>
+
+  <section class="card">
+    <h2>Recent feedback</h2>
+    <div id="list"></div>
+  </section>
+</main>
+<script>
+const token = localStorage.getItem('token');
+const headers = token ? { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' };
+
+async function api(path, opts={}) {
+  const res = await fetch(path, { ...opts, headers: { ...headers, ...(opts.headers||{}) } });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Error');
+  return data;
+}
+async function loadCourses() {
+  const data = await api('/api/courses');
+  document.getElementById('courseSelect').innerHTML = data.map(c => <option value="${c.id}">${c.code} — ${c.title}</option>).join('');
+}
+async function loadFeedback(courseId) {
+  const items = await api(/api/courses/${courseId}/feedback);
+  document.getElementById('list').innerHTML = items.map(f => `
+    <div class="card">
+      <strong>Rating:</strong> ${f.rating}/5
+      <p>${(f.comment || '').replace(/[<>&]/g,'')}</p>
+      <em>${new Date(f.created_at).toLocaleString()}</em>
+    </div>
+  `).join('');
+}
+document.getElementById('feedbackForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const payload = Object.fromEntries(new FormData(e.target).entries());
+  payload.rating = Number(payload.rating);
+  payload.courseid = Number(payload.courseid);
+  payload.isanonymous = !!payload.isanonymous;
+  try {
+    await api('/api/feedback', { method:'POST', body: JSON.stringify(payload) });
+    document.getElementById('status').textContent = 'Thanks. Your feedback was submitted.';
+    await loadFeedback(payload.course_id);
+    e.target.reset();
+  } catch (err) { document.getElementById('status').textContent = err.message; }
+});
+loadCourses().then(() => {
+  const first = document.getElementById('courseSelect').value;
+  if (first) loadFeedback(Number(first));
+});
+</script>
+</body>
+</html>
+`
+
+---
+
+Security and privacy
+
+- Authentication: JWT (Node) or secure sessions (PHP) with role-based authorization on every route.
+- Passwords: Hash with bcrypt/Argon2; never store plaintext.
+- Validation: Enforce rating bounds, IDs, and sanitize comments; always use parameterized queries.
+- Privacy: Allow anonymous submissions; instructors see only their courses.
+- Transport: HTTPS everywhere; secure cookies for PHP; don’t expose secrets in client code.
+- Abuse controls: Rate-limit POST endpoints; log and monitor.
+
+---
+
+Setup and deployment
+
+- Bootstrap database: Run the schema in MySQL; create at least one admin, instructor, and a couple of courses.
+- Node backend:
+  - Install: npm install express cors bcryptjs jsonwebtoken mysql2
+  - Env: DBHOST, DBUSER, DBPASS, DBNAME, JWT_SECRET, PORT
+  - Run: node server.js behind Nginx with HTTPS
+- PHP backend:
+  - Server: Apache/Nginx + PHP-FPM; route /api/* to api/index.php; enable HTTPS
+  - Config: DB credentials via env; sessions and CSRF enabled
+- Frontend:
+  - Serve static HTML/CSS from a public folder or the same server; point forms/JS to /api/*.
+
+If you tell me whether you prefer PHP or Node.js for deployment right now, I’ll tailor the file layout and exact commands for your environment in Bengaluru, so you can ship this without getting stuck in setup.
