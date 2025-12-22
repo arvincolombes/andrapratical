@@ -212,4 +212,7 @@ if __name__ == "__main__":
     print("In-order after insertion:", list(rbt.inorder()))
 
     rbt.delete(15)
-    print("In-order after deleting 15:", list(rbt.inorder()))
+    print("In-order after deleting 15:", list(rbt.inorder()
+
+
+I love my wife
