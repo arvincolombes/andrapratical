@@ -1,0 +1,208 @@
+Got it — you want to go with Node.js for the backend. Perfect choice if you’re aiming for a modern, RESTful API that plays nicely with a MySQL database and a lightweight HTML/CSS frontend. Let me lay out exactly how you’d set this up:
+
+---
+
+🔧 Tech stack
+
+- Frontend: HTML + CSS (forms, dashboards, responsive layout)
+- Backend: Node.js + Express (REST API, JWT authentication, role-based access)
+- Database: MySQL (users, courses, feedback)
+
+---
+
+📂 Project structure
+
+`
+student-feedback/
+├─ public/              # HTML/CSS frontend
+│  ├─ index.html
+│  ├─ login.html
+│  ├─ submit.html
+│  ├─ instructor.html
+│  └─ styles.css
+├─ server.js            # Express app entry point
+├─ package.json
+└─ database.sql         # Schema
+`
+
+---
+
+🗄️ Database schema (MySQL)
+
+`sql
+CREATE DATABASE feedback_db;
+USE feedback_db;
+
+CREATE TABLE users (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  name VARCHAR(100),
+  email VARCHAR(150) UNIQUE,
+  role ENUM('student','instructor','admin') DEFAULT 'student',
+  password_hash VARCHAR(255),
+  createdat TIMESTAMP DEFAULT CURRENTTIMESTAMP
+);
+
+CREATE TABLE courses (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  code VARCHAR(20) UNIQUE,
+  title VARCHAR(200),
+  instructor_id INT,
+  FOREIGN KEY (instructor_id) REFERENCES users(id)
+);
+
+CREATE TABLE feedback (
+  id INT AUTO_INCREMENT PRIMARY KEY,
+  student_id INT,
+  course_id INT,
+  rating TINYINT CHECK (rating BETWEEN 1 AND 5),
+  comment TEXT,
+  is_anonymous BOOLEAN DEFAULT FALSE,
+  createdat TIMESTAMP DEFAULT CURRENTTIMESTAMP,
+  FOREIGN KEY (student_id) REFERENCES users(id),
+  FOREIGN KEY (course_id) REFERENCES courses(id)
+);
+`
+
+---
+
+🚀 Backend (Node.js + Express)
+
+Install dependencies:
+
+`bash
+npm init -y
+npm install express mysql2 bcryptjs jsonwebtoken cors
+`
+
+server.js
+
+`js
+import express from 'express';
+import cors from 'cors';
+import bcrypt from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import mysql from 'mysql2/promise';
+
+const app = express();
+app.use(cors());
+app.use(express.json());
+
+const pool = mysql.createPool({
+  host: 'localhost',
+  user: 'root',
+  password: 'yourpassword',
+  database: 'feedback_db'
+});
+
+const JWT_SECRET = 'supersecret';
+
+// Middleware
+function auth(roles = []) {
+  return (req, res, next) => {
+    const header = req.headers.authorization || '';
+    const token = header.startsWith('Bearer ') ? header.slice(7) : '';
+    try {
+      const payload = jwt.verify(token, JWT_SECRET);
+      if (roles.length && !roles.includes(payload.role)) return res.status(403).json({ error: 'Forbidden' });
+      req.user = payload;
+      next();
+    } catch {
+      res.status(401).json({ error: 'Unauthorized' });
+    }
+  };
+}
+
+// Auth routes
+app.post('/api/auth/register', async (req, res) => {
+  const { name, email, password, role = 'student' } = req.body;
+  const hash = await bcrypt.hash(password, 10);
+  try {
+    await pool.execute('INSERT INTO users (name,email,role,password_hash) VALUES (?,?,?,?)', [name, email, role, hash]);
+    res.json({ ok: true });
+  } catch {
+    res.status(400).json({ error: 'Email exists' });
+  }
+});
+
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  const [rows] = await pool.execute('SELECT * FROM users WHERE email=?', [email]);
+  const user = rows[0];
+  if (!user || !(await bcrypt.compare(password, user.password_hash))) return res.status(401).json({ error: 'Invalid credentials' });
+  const token = jwt.sign({ id: user.id, role: user.role, name: user.name }, JWT_SECRET, { expiresIn: '7d' });
+  res.json({ token, user: { id: user.id, name: user.name, role: user.role } });
+});
+
+// Courses
+app.get('/api/courses', auth(), async (req, res) => {
+  const [rows] = await pool.execute('SELECT id, code, title FROM courses');
+  res.json(rows);
+});
+
+// Feedback
+app.post('/api/feedback', auth(['student']), async (req, res) => {
+  const { courseid, rating, comment, isanonymous } = req.body;
+  await pool.execute(
+    'INSERT INTO feedback (studentid, courseid, rating, comment, is_anonymous) VALUES (?,?,?,?,?)',
+    [req.user.id, courseid, rating, comment, isanonymous]
+  );
+  res.json({ ok: true });
+});
+
+app.get('/api/courses/:id/feedback', auth(['instructor','admin']), async (req, res) => {
+  const [rows] = await pool.execute('SELECT rating, comment, createdat FROM feedback WHERE courseid=? ORDER BY created_at DESC', [req.params.id]);
+  res.json(rows);
+});
+
+app.listen(3000, () => console.log('Server running on http://localhost:3000'));
+`
+
+---
+
+🎨 Frontend (HTML/CSS)
+
+A simple feedback form:
+
+`html
+<!doctype html>
+<html>
+<head>
+  <title>Submit Feedback</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <h1>Student Feedback</h1>
+  <form id="feedbackForm">
+    <label>Course</label>
+    <select id="courseSelect"></select>
+    <label>Rating</label>
+    <input type="number" min="1" max="5" name="rating">
+    <label>Comment</label>
+    <textarea name="comment"></textarea>
+    <label><input type="checkbox" name="is_anonymous"> Anonymous</label>
+    <button type="submit">Submit</button>
+  </form>
+  <script>
+    const token = localStorage.getItem('token');
+    async function api(path, opts={}) {
+      const res = await fetch(path, { ...opts, headers: { 'Authorization':'Bearer '+token, 'Content-Type':'application/json' } });
+      return res.json();
+    }
+    document.getElementById('feedbackForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const payload = Object.fromEntries(new FormData(e.target).entries());
+      payload.course_id = Number(document.getElementById('courseSelect').value);
+      payload.rating = Number(payload.rating);
+      await api('/api/feedback', { method:'POST', body: JSON.stringify(payload) });
+      alert('Feedback submitted!');
+    });
+  </script>
+</body>
+</html>
+`
+
+---
+
+✅ With this setup, you’ve got a working Node.js backend connected to MySQL, and a simple HTML/CSS frontend that can submit feedback and fetch course data.  
+
+Would you like me to expand this into an instructor dashboard with charts (using Chart.js) so instructors can visualize average ratings over time?
